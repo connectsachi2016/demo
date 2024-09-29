@@ -1,0 +1,156 @@
+Airflow Checklist-
+
+1. Set up postgres db backend as metastore
+2. Create users and assign roles to them. System roles - Op, Admin , User , public ,Viewer
+3. Set up snowflake/sql server connection in UI or via CLI. Must have apache-airflow-providers-snowflake provider to setup
+	snowflake connection. Put authenticator and private_key in extra field.
+
+	Test Connections command in CLI -  airflow connections test <conn_id>
+	
+	
+4. Change SQLAlchemy ORM connection string to access postgres db. 
+5. Change default settings in airflow config, like executor , load_examples , test_Connection , dag_active_runs etc...
+
+
+Dags - 
+
+Set dag level parameters - dag_id , start_date , schedule , catchup
+Other dag level parameters - tags , doc_md , template_searchpath , user_defined_macros 
+callbacks - on_success_callback , on_failure_callback, sla_miss_callback
+
+default_args , params , dag_display_name
+Set retries at dag and task level
+
+
+Branching-
+=========
+https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dags.html#control-flow
+Default - BranchPythonOperator
+Airflow offers a few other branching operators-
+BranchSQLOperator: Branches based on whether a given SQL query returns true or false.
+BranchDayOfWeekOperator: Branches based on whether the current day of week is equal to a given week_day parameter.
+BranchDateTimeOperator: Branches based on whether the current time is between target_lower and target_upper times.
+ExternalBranchPythonOperator: Branches based on a Python function like the BranchPythonOperator, but runs in a preexisting virtual environment like the ExternalPythonOperator (available in Airflow 2.7+).
+BranchPythonVirtualenvOperator: Branches based on a Python function like the BranchPythonOperator, but runs in newly created virtual environment like the PythonVirtualenvOperator (available in Airflow 2.8+). The environment can be cached by providing a venv_cache_path.
+
+There is much more to the BranchPythonOperator than simply choosing one task over another.
+
+What if you want to trigger your tasks only on specific days? And not on holidays?
+What if you want to trigger a DAG Run only if the previous one succeeded?
+
+
+Context and Macros - 
+=======================
+
+Variables, macros and filters can be used in templates (see the Jinja Templating section)
+Additional custom macros can be added globally through Plugins, or at a DAG level through the DAG.user_defined_macros argument.
+
+Template Ref - https://airflow.apache.org/docs/apache-airflow/stable/templates-ref.html
+
+
+Dags Best practices-
+https://www.astronomer.io/docs/learn/dag-best-practices?tab=good-practice#treat-your-dag-file-like-a-config-file
+
+Avoid Top level codes-
+SQL Code on display
+function calls outside the tasks
+
+
+Cross Dag Dependencies-
+=======================
+
+The Airflow topic Cross-DAG Dependencies, indicates cross-DAG dependencies can be helpful in the following situations:
+
+A DAG should only run after one or more datasets have been updated by tasks in other DAGs.
+Two DAGs are dependent, but they have different schedules.
+Two DAGs are dependent, but they are owned by different teams.
+A task depends on another task but for a different execution date.
+
+There are multiple ways to implement cross-DAG dependencies in Airflow, including:
+Dataset driven scheduling
+The TriggerDagRunOperator
+The ExternalTaskSensor
+The Airflow API
+
+Variables - 
+===========
+
+
+Set variables using env var - 
+AIRFLOW_VAR_MYREGULARVAR='my_value'
+AIRFLOW_VAR_MYJSONVAR='{"hello":"world"}'
+
+A.Access a variable 
+Access a variable - regular way
+ Variable.get('<VAR_NAME>', '<default-value>')  #RECOMMENDED #part of metadata db request
+ os.getenv('AIRFLOW_VAR_<VAR_NAME>','<default-value>')  #FASTER BUT LESS SECURE
+ foo_json = Variable.get("foo_baz", deserialize_json=True)
+ 
+B.Access a variable in templates
+Accessing a string in templates - {{ var.value.get('my.var', 'fallback') }}
+Accessing a json value in templates - {{ var.json.my_dict_var.key1 }}    OR {{ var.json.get('my.dict.var', {'key1': 'val1'}) }}
+
+
+
+Airflow Connections in Templates-
+{{ conn.my_conn_id.login }}
+ extras field of a connection can be fetched as a Python Dictionary with the extra_dejson field, 
+e.g. {{ conn.my_aws_conn_id.extra_dejson.get('region_name', 'Europe (Frankfurt)') }}
+
+
+
+Timedelta objects
+=================
+If you want to schedule your DAG on a particular cadence (hourly, every 5 minutes, etc.) 
+rather than at a specific time, you can pass a timedelta object imported from the datetime package to 
+the schedule parameter. 
+For example, schedule=timedelta(minutes=30) will run the DAG every thirty minutes, 
+and schedule=timedelta(days=1) will run the DAG every day.
+
+Note: Do not make your DAG's schedule dynamic (e.g. datetime.now())! This will cause an error in the Scheduler.
+
+
+
+Backfill past missing runs-
+==========================
+
+catchup = True 
+# Backfill tries to execute missing runs for each schedule interval/time slice between specified start and end
+> airflow dags backfill -s 2024-09-20 -e 2024-09-26 my_dag_id
+
+#If backfill runs FAIL due to some error, they don't respect retries (TRY_NUMBER remains same as of last backfill run)
+#We need to fix the issue OR set rerun failed task and reset task tries options by doing the following and respect the retries set at task level.
+> airflow dags backfill -s 2024-09-20 -e 2024-09-26 --rerun-failed-tasks --reset-dagruns my_dag
+ 
+#Backfilling can slow down due to retries , so you can disable retries by doing this and ensure tasks succeed.
+> airflow dags backfill -s 2024-09-20 -e 2024-09-26 --rerun-failed-tasks --reset-dagruns --disable-retries my_dag
+ 
+#Backward Backfilling
+> airflow dags backfill -s 2024-09-20 -e 2024-09-26 --reset-dagruns --pool my_dag_backfill  my_dag_backfill
+
+Steps-
+clone the dag (my_dag_backfill)
+run forward for current dag (my_dag)
+run backward for backfil dag (as it can't be used to run forward for upcoming intervals)
+create a separate pool for backfill
+backfill should run in local executor
+
+
+
+
+
+
+
+
+to-do-
+=====
+
+#How to implement dataset aware scheduling
+#Handling timeouts vs sla misses 
+#Sending email on callbacks vs email thru python operator or best of both - https://www.bhavaniravi.com/apache-airflow/sending-emails-from-airflow
+#Requirements lock  
+#Storage backend to peridically sync for dag logs/task logs and scheduler/dag processor logs. 
+#pgbouncer connection pooler setup
+#Workday timetable 
+#Dynamic task mapping
+Git sync with dag paths
