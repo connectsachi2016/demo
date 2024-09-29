@@ -1,0 +1,128 @@
+
+
+/***************************INSTALL AIRFLOW WITH WSL WINDOWS**************************/
+
+Install WSL - 
+GO TO WINDOWS FEATURES IN START MENU - 
+Enable checkboxes for both Windows Subsystem for Linux (WSL) and virtual machine platform
+ and restart machine if required 
+Run command prompt in admin mode 
+wsl --list --online   #this show all ubuntu version available online 
+wsl --install ubuntu-22.04
+It will take 5-10 mins to download and install 
+ubuntu-22.04 will appear in start menu 
+Launch and set username and password
+Done
+
+Run basic packages-
+==================
+sudo apt update
+sudo apt -y install awscli
+sudo apt --yes install python3-pip
+sudo apt --yes install sqlite3
+sudo apt-get --yes install libpq-dev
+pip3 install --upgrade awscli
+
+Create a virtual env-
+====================
+sudo pip3  install virtualenv 
+python3 -m virtualenv  /home/ubuntu/venv 
+source /home/ubuntu/venv/bin/activate
+
+Install airflow with compatible version of python (IMPORTANT) -
+=================================================
+Check python version - python3 --version  OR  python --version
+If using python 3.8 - run below-
+	pip install 'apache-airflow[postgres]==2.10.1' --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.1/constraints-3.8.txt"
+	pip install apache-airflow-providers-snowflake==5.7.0
+OR,
+If using python 3.10 - run below-
+	pip install 'apache-airflow[postgres]==2.10.1' --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.1/constraints-3.10.txt"
+	pip install apache-airflow-providers-snowflake==5.7.0
+
+sudo apt-get --yes install postgresql postgresql-contrib
+
+
+Setup for postgres-
+=================
+sudo -i -u postgres <<'EOpostgres'
+psql -U postgres -c "CREATE DATABASE airflow;"
+psql -U postgres -c "CREATE USER airflow WITH PASSWORD 'airflow';"
+psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE airflow TO airflow;"
+EOpostgres
+
+Initialize airflow- 
+==================
+airflow db init
+sed -i 's#sqlite:////home/ubuntu/airflow/airflow.db#postgresql+psycopg2://airflow:airflow@localhost/airflow#g' /home/ubuntu/airflow/airflow.cfg
+sed -i 's#SequentialExecutor#LocalExecutor#g' /home/ubuntu/airflow/airflow.cfg
+airflow users create -u airflow -f airflow -l airflow -r Admin -e connnectsachi2016@gmail.com -p airflow
+
+Create dags folder and move some sample dags(Optional) -
+========================================================
+mkdir /home/ubuntu/airflow/dags
+aws s3 cp s3://s3-xeon-east/airflow/dags/ /home/ubuntu/dags
+
+set dag folder path in airflow config file (airflow.cfg)
+=======================================================
+
+sed -i 's/^dags_folder = .*/dags_folder = \/home\/ubuntu\/airflow\/dags/' /home/ubuntu/airflow/airflow.cfg
+sed -i 's/^load_examples = .*/load_examples = False/' /home/ubuntu/airflow/airflow.cfg
+
+Re-Initialize airflow-
+======================
+airflow db init
+
+Start webserver and scheduler 
+=============================
+airflow scheduler && airflow webserver -p 8080 &
+
+Go to browser - 
+=============
+localhost:8080
+
+Install gedit for better editor-
+=================================
+sudo apt-get update 
+sudo apt install gedit
+
+Open bashrc-
+===========
+gedit ~/.bashrc #make changes like this
+
+#custom aliases
+alias web='airflow webserver &'
+alias sch='airflow scheduler &'
+alias venv='source venv/bin/activate'
+alias aflstatus='lsof -i tcp'
+alias aflstart='airflow webserver && airflow scheduler &'
+alias aflstop='pkill -f "airflow webserver" && pkill -f "airflow scheduler"'
+
+    example Usage - astat -p 8080
+
+source ~/.bashrc   #this is required for aliases to work in terminal 
+cat ~/.bash_aliases 
+
+venv  #to activate virtual env 
+aflstart #to start airflow webserver and scheduler 
+aflstop #to stop
+aflstatus #to check status
+
+
+Connect with WinSCP - Install Winscp.exe first in windows
+===================
+sudo apt remove openssh-server
+sudo apt install openssh-server
+
+sudo vi /etc/ssh/sshd_config
+Edit-
+Press INS Command to write
+Check for and UNCOMMENT the following -
+PasswordAuthentication yes
+Add below line -
+AllowUsers ubuntu
+ Esc to lock 
+ :wq to save
+ :q! to quit without saving
+sudo service ssh start
+
