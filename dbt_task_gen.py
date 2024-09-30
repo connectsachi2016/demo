@@ -56,6 +56,7 @@ sql_path = "/home/ubuntu/airflow/include/Scripts/sql"
 itr = 3
 
 
+
 def fetch_num(itrnum):
   print(itrnum)
 
@@ -73,7 +74,7 @@ def get_listings():
   return listings
 
 with DAG(
-    dag_id="dynamic_task_generation", #make sure to change this while copying pasting from other dags
+    dag_id="dynamic_task_gen_final", #make sure to change this while copying pasting from other dags
     description = "My dag",
     start_date=datetime(2024, 9, 27),
     schedule=schedule,
@@ -210,6 +211,11 @@ with DAG(
  # connection to snowflake defined as a URI
  # AIRFLOW_CONN_SNOWFLAKE_CONN='snowflake://MEETNANU:QAWS123qaws/?account=WHB16096&region=us-east-1'
 
+  AUM_Load = BashOperator(
+          task_id="AUM_Load",
+          bash_command='echo "dbt run --select AUM_Load"'
+        )
+
   End = EmptyOperator(task_id="End", trigger_rule=TriggerRule.ALL_DONE)
 
 
@@ -226,5 +232,5 @@ with DAG(
 
     #Start >> grp >> stg_grp >> select_date >> int_grp  >> query_status >> Iteration >> End
 
-Start >> stg_grp  >> int_grp  >>  End
+Start >> stg_grp  >> int_grp  >> AUM_Load >> End
 
