@@ -10,6 +10,8 @@ Airflow Checklist-
 	
 4. Change SQLAlchemy ORM connection string to access postgres db. 
 5. Change default settings in airflow config, like executor , load_examples , test_Connection , dag_active_runs etc...
+6. Airflow ignore file  
+7. Requirements file with versions.
 
 
 Dags - 
@@ -18,7 +20,7 @@ Set dag level parameters - dag_id , start_date , schedule , catchup
 Other dag level parameters - tags , doc_md , template_searchpath , user_defined_macros 
 callbacks - on_success_callback , on_failure_callback, sla_miss_callback
 
-default_args , params , dag_display_name
+default_args , params , dag_display_name ,max_active_runs
 Set retries at dag and task level
 
 
@@ -72,7 +74,8 @@ The TriggerDagRunOperator
 The ExternalTaskSensor
 The Airflow API
 
-Variables - 
+Variables - Opens up multiple connections to the database, one for each variable.
+So it is recommended that to use json format for storing variables
 ===========
 
 
@@ -84,7 +87,7 @@ A.Access a variable
 Access a variable - regular way
  Variable.get('<VAR_NAME>', '<default-value>')  #RECOMMENDED #part of metadata db request
  os.getenv('AIRFLOW_VAR_<VAR_NAME>','<default-value>')  #FASTER BUT LESS SECURE
- foo_json = Variable.get("foo_baz", deserialize_json=True)
+ foo_json_dict = Variable.get("foo_baz", deserialize_json=True)  #creates a dict/loaded to memory
  
 B.Access a variable in templates
 Accessing a string in templates - {{ var.value.get('my.var', 'fallback') }}
@@ -142,13 +145,21 @@ backfill should run in local executor
 
 
 
+
+
+
+
+
 to-do-
 =====
+kwargs,zip,expand,get_current_context
+decorators
 
 #How to implement dataset aware scheduling
 #Handling timeouts vs sla misses 
 #Sending email on callbacks vs email thru python operator or best of both - https://www.bhavaniravi.com/apache-airflow/sending-emails-from-airflow
 #Requirements lock  
+#XCOMS
 #Storage backend to peridically sync for dag logs/task logs and scheduler/dag processor logs. 
 #pgbouncer connection pooler setup
 #Workday timetable 
