@@ -1,0 +1,452 @@
+
+schedule_interval="@daily",
+start_date=dt.datetime(2022, 12, 31) #2023/01/01 - sechedule_interval
+
+start_date = 12/31/2023 = same as very first execution date
+execution_date = 12/31  data collection interval - 12/31 - 1/1  , first run - 1/1/2024
+execution_date = 1/1  data collection interval - 1/1 - 1/2  , second run - 1/2/2024
+execution_date = 1/2  data collection interval - 1/2 - 1/3  , third run - 1/3/2024
+
+
+* execution_date = logical_Date = start of data collection interval , changes daily as per daily schedule, hourly as per hourly schedule 
+* start_date = date collection starts , this never changes
+
+
+
+--Run parametrized sql stmt from a file using jinja and snowflake operator
+#https://stackoverflow.com/questions/61948379/airflow-snowflake-operator-tries-to-execute-sql-file-path-as-sql-statement
+
+--Read data from snowflake to pandas and write to a file 
+https://medium.com/snowflake/snowflake-to-python-read-sql-and-fetch-pandas-663da65d5e0c
+
+https://stackoverflow.com/questions/16923281/writing-a-pandas-dataframe-to-csv-file
+
+1.Connection Mapping - How to connect to snowflake in an airflow env?
+
+Astronomer Cosmos supports *two* methods of authenticating with your database:
+
+> bring your own dbt profiles.yml file
+> or , using Airflow connections via Cosmos’ profile mappings which converts into dbt profiles.yml
+
+If we have a  snowflake connection set up in Airflow Web UI,
+it’s recommended to use a profile mapping to translate that Airflow connection to a dbt profile.
+
+What is a Profile mapping?
+
+Profile mappings are utilities provided by Cosmos that translate Airflow connections to dbt profiles.
+This means that we can use the same connection objects used in Airflow to authenticate with your database in dbt.
+To do so, there’s a class in Cosmos for each Airflow connection to dbt profile mapping.
+
+ProfileMapping Classes - related to snowflake 
+---------------------------------------------
+> SnowflakeUserPassword
+> SnowflakeEncryptedPrivateKeyFilePem
+> SnowflakeEncryptedPrivateKeyPem
+> SnowflakePrivateKeyPem (with no key passphrase)
+
+
+2.Operators- How to run airflow tasks?
+
+*Option-1*- 
+- Using BashOperator - 
+  Using the BashOperator to run dbt run and other dbt commands can be useful during development.
+
+Advantages- 
+> Simple to use , less code footprint
+
+Disadvantages-
+> There is low observability into what execution state the project is in.
+> Failures are absolute and require all models in a project to be run again, which can be costly.
+
+
+*Option-2*- 
+> Extracting nodes from manifest.json file in the dbt target folder and reconstructing the dag.
+
+Advantages- 
+> Flexible than BASH 
+> Creates a task for each node , enabilng high visibilty.
+> Tasks can be re-run from point of failure.
+
+Disadvantages-
+> Highly complex and error prone to implement and maintain when dag complexity increases over time.
+
+
+*Option-3*- (Using Cosmos API DBT classes)
+
+> The Cosmos API exposes DbtTaskGroup and DbtDag classes
+> The Cosmos API exposes other classes for connecting , accessing , executing, rendering dbt models as listed below.
+ 
+- ProfileConfig  - to connect to snowflake using airflow connections using ProfileMapping classes.
+- ProjectConfig  - specify information about where your dbt project is located and project variables that should be used for rendering and execution
+- ExecutionConfig - control over how your dbt project is executed when running in airflow, set the execution mode - Local/VirtualEnv/Docker/Azure Container Instance.
+- RenderConfig  - controls how dbt project is rendered as an Airflow DAG or Task Group. 
+
+ 
+Advantages- 
+> Flexible than both Options-1 & 2 above.
+> Converts dbt dags into airflow dags. 
+> Tasks can be re-run from point of failure.
+> Logging with high visibilty.
+> Recommended method to take advantage of Airflow capabilities fully.
+
+
+3.Astronomer Cosmos API related modes and configurations
+======================================================
+The various modes described below are impacted by whether Airflow is deployed 
+in a standalone or multi cluster mode and availability of dbt executable to scheduler and/or worker nodes .
+
+
+Invocation Mode
+===============
+
+It supports 2 modes-
+
+A.InvocationMode.SUBPROCESS- 
+> Cosmos runs dbt cli commands using the Python subprocess module and parses the output to capture logs and to raise exceptions.
+
+B.InvocationMode.DBT_RUNNER- requires dbt version 1.5.0 or higher.
+> Cosmos uses the dbtRunner available for dbt programmatic invocations to run dbt commands.
+> In order to use this mode, dbt must be installed in the same local environment. 
+> This mode does not have the overhead of spawning new subprocesses or parsing the output of dbt commands
+> and is faster than InvocationMode.SUBPROCESS.
+> It is up to the user to resolve Airflow and dbt dependencies conflicts when using this mode.
+
+
+LoadMode - How to get the dbt nodes from dbt environment for task creation?
+========
+It supports 2 modes-
+
+A.LoadMode.DBT_LS  -
+> Requires DBT present and available to AIRFLOW_SCHEDULER. 
+> The "DBT LS" command output is cached to an airflow variable and re-used to speed up the dag creation in subsequent runs.
+   #Usage by cosmos - e.g. dbt list --select tag:daily
+   
+> Cache Refresh-
+    Cosmos will refresh the cache in a few circumstances:
+    if any files of the dbt project change
+    if one of the arguments that affect the dbt ls command execution changes
+
+
+B.LoadMode.Manifest -
+> It doesn't rely on dbt , it reads the manifest json file , use this if you are using local execution mode (COVERED NXT)
+where dbt is NOT available to airflow scheduler.
+
+
+Execution modes -  Which execution environment the tasks should run on?
+===============
+
+A.Local  -
+
+execution_mode = ExecutionMode.Local 
+> Faster execution
+> local execution mode assumes a dbt binary is reachable within the Airflow worker node.
+> Cosmos converts Airflow Connections into a native dbt profiles file (profiles.yml).
+> Cosmos supports both invocation modes - InvocationMode.SUBPROCESS and InvocationMode.DBT_Runner, EXPLAINED ABOVE.
+> We can also use the existing venv path for the dbt executable and still run in local execution mode.
+
+B.Virtual Env -
+
+execution_mode = ExecutionMode.VIRTUALENV 
+
+> Slower than local execution mode.
+> dbt needs to available in airflow scheduler else LoadMode.DBT_LS will not work ,so use LoadMode.MANIFEST instead.
+> Supports only InvocationMode.SUBPROCESS , DOESNOT SUPPORT  InvocationMode.DBT_Runner.
+> This creates a new venv for each dbt task which can be slow.
+> Cosmos converts Airflow Connections into a native dbt profiles file (profiles.yml).
+
+C.Docker - 
+TBD 
+
+D.Azure Container Instances- 
+TBD
+
+4.DAG Examples
+==============
+
+
+########################################Example - Using Bash Operator#############################################################
+
+
+from pendulum import datetime
+from airflow.decorators import dag
+from airflow.operators.bash import BashOperator
+
+PATH_TO_DBT_PROJECT = "<path to your dbt project>"
+PATH_TO_DBT_VENV = "<path to your venv activate binary>"
+
+
+@dag(
+    start_date=datetime(2024, 9, 24),
+    schedule="@daily",
+    catchup=False,
+)
+def dbt_dag():
+    dbt_run = BashOperator(
+        task_id="dbt_run",
+        bash_command="source $PATH_TO_DBT_VENV && dbt run --models .",
+        env={"PATH_TO_DBT_VENV": PATH_TO_DBT_VENV},
+        cwd=PATH_TO_DBT_PROJECT,
+    )
+
+
+dbt_dag()
+
+
+
+########################################Example - Using Cosmos API#############################################################
+
+Create separate py files to store Profile , Project , Execution configs and reference them by importing modules into the dag py files.
+
+
+#Create separate py file - Config/profile_config.py
+
+"Contains profile mappings used in the project"
+
+from cosmos import ProfileConfig
+from cosmos.profiles import SnowflakeUserPasswordProfileMapping
+from cosmos.profiles import SnowflakePrivateKeyPemProfileMapping  #OR THIS FOR KP Auth with Private key 
+from cosmos.profiles import SnowflakeEncryptedPrivateKeyFilePemProfileMapping  #OR THIS FOR KP Auth with Private key file path
+
+#use any one profile based on whether you are using password/keypem content / keypem file
+profile_config_KeyPem = SnowflakeEncryptedPrivateKeyPemProfileMapping(
+    conn_id = 'snowflake_conn',
+                        profile_args= {
+                         "account" : extra.account,  #comes from Airflow connections
+                         "user" : login,
+                         "private_key" : extra.private_key_content,
+                         "warehouse" : extra.warehouse,
+                         "role" : extra.role,
+                         "database": extra.database,
+                         "schema": schema,
+                         "private_key" : extra.private_key_content,
+                         "private_key_passphrase" : password
+                        },
+)
+
+
+
+profile_config_KeyFilePem = SnowflakeEncryptedPrivateKeyFilePemProfileMapping(conn_id="snowflake_conn", 
+                         profile_args={
+                         "account" : extra.account,
+                         "user" : login,
+                         "private_key" : extra.private_key_content,
+                         "warehouse" : extra.warehouse,
+                         "role" : extra.role,
+                         "database": extra.database,
+                         "schema": schema,
+                         "private_key_path" : extra.private_key_file,
+                         "private_key_passphrase" : password
+                        },
+  )
+ 
+
+
+profile_config_UserPass = ProfileConfig(
+   # profile_name="default", --projectname
+   # target_name="dev",
+    profile_mapping=SnowflakeUserPasswordProfileMapping(conn_id="snowflake_conn", 
+                         profile_args={
+                         "account" : extra.account,
+                         "user" : login,
+                         "private_key" : extra.private_key_content,
+                         "warehouse" : extra.warehouse,
+                         "role" : extra.role,
+                         "database": extra.database,
+                         "schema": schema
+                        },
+ )
+ )
+ 
+############################################Config/execution_config.py##########################################################
+ 
+#Create separate py file - Config/execution_config.py
+
+"Contains constants used in the DAGs"
+
+from pathlib import Path
+from cosmos import ExecutionConfig
+from cosmos import InvocationMode
+
+
+
+#use any one of the path based on set-up
+venv_dbt_project_path = Path("/usr/local/airflow/dbt_venv/dbt/") #use this with venv in local execution mode 
+dbt_project_path = Path("/usr/local/airflow/dbt/") #use this with local execution mode 
+
+#use any one of the dbt executable based on set-up
+venv_dbt_executable = Path("/usr/local/airflow/dbt_venv/bin/dbt") #use this with venv in local execution mode 
+dbt_executable = Path("/usr/local/airflow/bin/dbt") #use this with local execution mode 
+
+#use any one of the following execution config based on set-up
+venv_execution_config = ExecutionConfig(
+     execution_mode=ExecutionMode.LOCAL,
+    dbt_executable_path=str(venv_dbt_executable),  #dbt inside a venv ,execution mode = local
+    invocation_mode=InvocationMode.SUBPROCESS
+)
+
+
+local_execution_config = ExecutionConfig(
+     execution_mode=ExecutionMode.LOCAL,
+    dbt_executable_path=str(dbt_executable),    #local dbt ,execution mode = local
+    invocation_mode=InvocationMode.SUBPROCESS
+    #invocation_mode=InvocationMode.DBT_RUNNER    
+) 
+
+
+##############################################Config/project_config.py ########################################################
+
+#Create separate py file - Config/project_config.py 
+
+"Contains dbt project path , project level vars ,  used in the DAGs"
+
+
+from cosmos.config import ProjectConfig
+from Config import execution_config  #Config/execution_config.py
+
+#use any one of the following path based on set-up
+DEFAULT_DBT_ROOT_PATH = Path(__file__).parent / "dbt" #not required, just in  case ,used as fallback
+DBT_ROOT_PATH = venv_dbt_executable #dbt_executable   #Path(os.getenv("DBT_ROOT_PATH", DEFAULT_DBT_ROOT_PATH))
+
+
+--recommended to put dbt_vars here in project config 
+proj_config = ProjectConfig(
+    dbt_project_path=(venv_dbt_project_path / "myproject").as_posix(), #maintain backward slash
+    project_name="myproject",
+    models_relative_path="models",  #use json file to lookup these values
+    seeds_relative_path="seeds",
+    snapshots_relative_path="snapshots",
+    manifest_path=(venv_dbt_project_path / "myproject" /"manifest.json").as_posix(),
+    env_vars={"private_key_path": "/usr/local/snow.p8"},
+    dbt_vars={ #used to pass variables as a YAML dict into the project level vars defined in dbt_project yml
+        "bus_Dt": "2024-09-23",
+        "start_time": "{{ data_interval_start.strftime('%Y%m%d%H%M%S') }}",
+        "end_time": "{{ data_interval_end.strftime('%Y%m%d%H%M%S') }}",
+    },
+)
+
+
+################################################DAG######################################################
+
+#Create separate py file - dag.py 
+
+
+#python classes
+import os
+from datetime import datetime
+from pathlib import Path
+
+#airflow specific classes
+from airflow.decorators import dag
+from airflow.operators.empty import EmptyOperator
+
+#cosmos specific classes
+from cosmos import DbtTaskGroup, ExecutionConfig, ProjectConfig, RenderConfig , ProfileConfig
+from cosmos.constants import InvocationMode 
+
+#my custom imports
+from Config import profile_config,project_config,execution_config  #custom imports
+
+
+
+#use manifest file instead of DBT_LS invocation_mode to render dbt models
+render_config = RenderConfig(load_method=LoadMode.DBT_MANIFEST, select=["path:models/my_model.sql"])
+
+# hardcoded example
+@dag(
+    schedule_interval="@daily",
+    start_date=datetime(2024, 9, 24),
+    catchup=False,
+    default_args={"retries": 2},
+)
+def load_using_manifest() -> None:
+
+    pre = EmptyOperator(task_id="pre")
+
+
+    manifest_load = DbtTaskGroup(
+        group_id="local_example",
+        project_config=ProjectConfig(
+            manifest_path=venv_dbt_project_path / "myproject" / "target" / "manifest.json",
+            project_name="myproject",
+        ),
+        profile_config=profile_config_KeyFilePem, #from custom imports
+        render_config=render_config,
+        execution_config=ExecutionMode.LOCAL,
+        operator_args={"install_deps": True},
+    )
+    
+    post = EmptyOperator(task_id="post")    
+
+    pre >> manifest_load >>post
+
+#function call   
+load_using_manifest() 
+
+
+################################################
+
+
+import os
+from datetime import datetime
+from pathlib import Path
+
+from airflow.decorators import dag
+from airflow.operators.empty import EmptyOperator
+
+from cosmos import DbtTaskGroup, ExecutionConfig, ProjectConfig, RenderConfig , ProfileConfig
+from cosmos.constants import InvocationMode #DBT_RUNNER OR SUBPROCESS
+from Config import profile_config,project_config,execution_config  #custom imports
+
+
+@dag(
+    schedule_interval="@daily",
+    start_date=datetime(2024, 9, 24),
+    catchup=False,
+)
+def dbt_task_group() -> None:
+    """
+    The simplest example of using Cosmos to render a dbt project as a TaskGroup.
+    """
+    pre = EmptyOperator(task_id="pre")
+
+    # Load AUM task group
+    AUM_Load = DbtTaskGroup(
+        group_id="AUM", #identifier
+        project_config = proj_config,  #reference using custom imports
+        render_config=RenderConfig(
+            select=["tag:AUM"], #tag models/tests in dbt first to use this
+            enable_mock_profile=False, # This is necessary to benefit from partial parsing when using ProfileMapping class
+            env_vars={"PURGE": os.getenv("PURGE", "0")}, #purge dbt ls cache if explicitly passed else don't
+            airflow_vars_to_purge_dbt_ls_cache=["purge"],
+        ),
+        execution_config=venv_execution_config,  #using custom imports
+        operator_args={"install_deps": True}, #runs dbt deps command to install specified packages in dbt if any
+        profile_config=profile_config_KeyFilePem,  #using custom imports
+        default_args={"retries": 2}, #retry attempts for the task group
+    )
+
+    # Load LI_L2 task group
+    LI_L2_Load = DbtTaskGroup(
+        group_id="LI_L2",
+        project_config=project_config,
+        render_config=RenderConfig(
+            select=["tag:LI_L2"],
+            enable_mock_profile=False, 
+        ),
+        execution_config=venv_execution_config,
+        operator_args={"install_deps": True},
+        profile_config=profile_config_KeyFilePem,
+        default_args={"retries": 2},
+    )
+
+    post = EmptyOperator(task_id="post")
+
+
+    pre >> AUM_Load >> post
+    pre >> LI_L2_Load >> post
+    
+   # OR THIS!
+   # pre >> AUM_Load  >> LI_L2_Load >> post
+
+#function calls
+dbt_task_group()
