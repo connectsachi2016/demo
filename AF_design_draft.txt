@@ -1,0 +1,86 @@
+Instrument Audit- strategy = merge , unique keys (Instid , create_dt)
+STEP-
+
+> New records with new instid in source not present in audit(is_Delete = 0) are inserted with CURRENT_TIMESTAMP as create_Dt
+Changed records with is_Delete = 0  (1 -> 0 , 0 -> 1) are also inserted with CURRENT_TIMESTAMP as create_Dt
+deleted records from asset source are soft deleted in audit(is_delete = 0)??
+check whether instrumentid is a pk or has business value??
+> 
+
+view - reports only updates (1 -> 0 , 0 -> 1)
+STEP-
+
+> Find interesting instruments which have latest create_Dt since lastrun and is_Delete = 0
+exclude records which have only 1 row (i.e. exclude inserts)
+> 
+
+check instrument that have changed SEI_Fund_Fl and still active(is_Delete=0)
+update - Instrument with fl = 0/1 and create_Dt > last_run  and prev_record = 1/0 and is_delete = 0
+Make sure to exclude new instruments
+NOT IN (select cusip,count(1) as cnt from tf_fund where is_delete = 0 group by cusip having count(1) = 1)
+
+how to implement cleanup/restore especially with delete flag?
+delete records where create_Dt > lastrun
+update delete_Fl = 0,update_Dt = create_Dt for records where update_Dt > lastrun and delete_Fl = 1
+
+TF Fund-
+
+pick MAX(remove_Dt) from tf_fund for all cusips just in case multiple entries for a cusip , we need the most recent one only
+filter - rank by max(create_dt) for each cusip in audit to compare top record(rn=1) in source data -if not match then insert
+
+> New records with new cusip in source not present in audit(is_Delete = 0) are inserted with CURRENT_TIMESTAMP as create_Dt
+Changed records with is_Delete = 0  (1 -> 0[removed] , 0 -> 1[came back]) are also inserted with CURRENT_TIMESTAMP as create_Dt
+deleted records from tf_fund source are soft deleted(delete = 1) in audit(is_delete = 0)??
+check whether cusip ever comes back?
+> 
+- -Insert - donot USE
+--A new record for new cusip coming in - cusip is not found in Audit
+--insert changed record - from active to removed - compare cusip status with max create_dt entry
+--A new record when cusip comes back after being soft deleted
+
+View- reports - Inserts + updates
+--only pick those entries that are inserted since last run and automatically qualify as changed
+
+Find interesting cusip which have latest create_Dt since lastrun and is_Delete = 0 (this would suffice)
+Number records with matching cusip and filter with row_number <= 2(is it really required?)
+
+insert - cusip with fl = 1 and create_Dt > last_run and is_delete = 0
++
+update - cusip with fl = 0 and create_Dt > last_run  and prev_record = 1 and is_delete = 0
+
+Holding relationship view- 
+
+Logic - relationship view
+i.Find all records where update_Dt >= lastrundate and number them(using row_number())
+based on accountid/portfolio order by from_dt desc
+and then filter records based on row_num <= 2
+ii. Pivot to display old/new values as column for all tracked change attributes.
+
+Use/Update last run time - task retry (2)
+today - 10/26-
+last run set in event log to yesterday for initial load -10/25 0:00 - dbt will only process deltas
+hist_Relationship backfill data must have update_dt/audit_timestamp set to cast(last run date as date)
+look for any changes/updated > last run from event log
+last run must be set to cast(1st_dbt_run as date) - 1 for initial run
+
+Tasks -
+
+1. Add portfolio_nm and portfolio_tp to swp_account view in BASE folder ,
+add table reference to sources.yml ,
+create a view in staging folder
+2. Add portfolio_nm and portfolio_tp to holding_relationship sql + yml ,
+also add its sources to souce.yml - SWP_Account and Product_Portfolio_Config and create view on them if not done already.
+3. Create event table -  event_id , event_name , LastRunTime , event_desc   extra/aux , Record_Updated_ts
+Create event_execution table -  event_execution_id ,event_id,  start_time , end_time , event_status , event_log_msg ,  Record_Updated_ts
+4. Create holding relationship view to show changes since LastRunTime
+5. Create Instrument Audit incremental table
+6. Create Instrument Audit View to show changes since LastRunTime
+7. Create NTF Audit incremental table
+8. Create NTF Audit View to show changes since LastRunTime
+9. Create Change_Track_Stage and incremental table to capture changes since LastRunTime
+10. Create Artificial Flow Stage and incremental table
+11. Convert swp_account view in BASE folder from raw sql to dbt sql and also configure referenced tables in sources.yml.
+12. Housekeeping - Update yml definitions and add constraints, tests , tags.
+13. Market value fix - SELECT Min(market_value_Dt) from holding_detail where market_value_Dt > (select max(market_value_Dt) from AUM)
+14. Fix lastrundate value to current_date() - 1 if it is null ,also set backfill data create_Dt/update_dt to lastrundate
+15. Use timezone - TIMESTAMP_LTZ(9)
