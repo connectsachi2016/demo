@@ -49,6 +49,8 @@ sudo -i -u postgres <<'EOpostgres'
 psql -U postgres -c "CREATE DATABASE airflow;"
 psql -U postgres -c "CREATE USER airflow WITH PASSWORD 'airflow';"
 psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE airflow TO airflow;"
+psql -U postgres -c "ALTER DATABASE airflow OWNER TO airflow;"
+psql -U postgres -c "GRANT ALL ON SCHEMA public TO airflow;"
 EOpostgres
 
 Initialize airflow- 
